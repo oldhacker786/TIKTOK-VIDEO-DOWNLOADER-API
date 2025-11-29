@@ -39,64 +39,36 @@ export default {
     }
 
     try {
-      // Step 3: Try multiple SIM database APIs
-      console.log(`Fetching SIM data for CNIC: ${cnic}`);
+      // Step 3: Direct API call to cnic.sims.pk
+      const simsUrl = `https://cnic.sims.pk/SIMInformationD.php?CNIC=${cnic}&MV=1&TV=0&UV=3&WV=0&ZV=1&MD=1&TD=0&UD=0&WD=0&ZD=0&TTV=5&TTD=1&error=`;
       
-      let resultData = null;
+      console.log(`Fetching data for CNIC: ${cnic}`);
       
-      // Try Source 1: RIDHA SIM Tracker (working source)
-      try {
-        console.log('Trying RIDHA SIM Tracker...');
-        resultData = await fetchRidhaData(cnic);
-        if (resultData && resultData.sim_details.total_numbers > 0) {
-          console.log('Success from RIDHA SIM Tracker');
+      const response = await fetch(simsUrl, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.9',
+          'Referer': 'https://cnic.sims.pk/',
+          'Origin': 'https://cnic.sims.pk'
         }
-      } catch (error) {
-        console.log('RIDHA failed:', error.message);
+      });
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
       }
 
-      // Try Source 2: Alternative SIM databases
-      if (!resultData || resultData.sim_details.total_numbers === 0) {
-        try {
-          console.log('Trying alternative sources...');
-          resultData = await fetchAlternativeData(cnic);
-        } catch (error) {
-          console.log('Alternative sources failed:', error.message);
-        }
-      }
+      const html = await response.text();
+      
+      // Step 4: Parse the HTML response
+      const resultData = parseSimsData(html, cnic);
 
-      // If no data found, return informative message
-      if (!resultData || resultData.sim_details.total_numbers === 0) {
-        return new Response(
-          JSON.stringify({
-            status: "success",
-            data: {
-              cnic: cnic,
-              message: "No SIMs found or unable to fetch data due to security restrictions",
-              note: "Official PTA sources require CAPTCHA verification",
-              official_links: [
-                "https://cnic.sims.pk",
-                "https://dirbs.pta.gov.pk",
-                "https://siminfo.pta.gov.pk"
-              ],
-              manual_check: "Send 'N <CNIC>' to 668 for SIM information"
-            },
-            credit: "@old_studio786"
-          }, null, 2),
-          {
-            headers: {
-              'Content-Type': 'application/json',
-              'Access-Control-Allow-Origin': '*'
-            }
-          }
-        );
-      }
-
-      // Step 4: Create final response with successful data
+      // Step 5: Create final response
       const result = {
         status: "success",
         data: resultData,
-        source: "multiple_sources",
+        source: "cnic.sims.pk",
         timestamp: new Date().toISOString(),
         credit: "@old_studio786"
       };
@@ -118,8 +90,9 @@ export default {
       return new Response(
         JSON.stringify({
           status: "error",
-          message: "Service temporarily unavailable",
-          suggestion: "Please try official PTA websites directly",
+          message: "Unable to fetch SIM data",
+          error: error.message,
+          suggestion: "Please check if the CNIC is correct and try again",
           credit: "@old_studio786"
         }, null, 2),
         {
@@ -134,193 +107,108 @@ export default {
   }
 };
 
-// Fetch data from RIDHA SIM Tracker
-async function fetchRidhaData(cnic) {
-  const simTrackerUrl = 'https://ridhasimtracker.com/result.php';
-  
-  // Prepare form data for POST request
-  const formData = new URLSearchParams();
-  formData.append('cnic', cnic);
-  formData.append('submit', 'Check');
-
-  const trackerResponse = await fetch(simTrackerUrl, {
-    method: 'POST',
-    headers: {
-      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-      'Content-Type': 'application/x-www-form-urlencoded',
-      'Referer': 'https://ridhasimtracker.com/',
-      'Origin': 'https://ridhasimtracker.com'
-    },
-    body: formData.toString()
-  });
-
-  const html = await trackerResponse.text();
-  
-  return parseRidhaData(html, cnic);
-}
-
-// Parse RIDHA SIM Tracker data
-function parseRidhaData(html, cnic) {
+// Parse cnic.sims.pk HTML data
+function parseSimsData(html, cnic) {
   const networks = [];
   
-  // Network patterns
-  const networkPatterns = [
-    { name: "Jazz", regex: /Jazz[^0-9]*(\d+)/gi },
-    { name: "Telenor", regex: /Telenor[^0-9]*(\d+)/gi },
-    { name: "Ufone", regex: /Ufone[^0-9]*(\d+)/gi },
-    { name: "Zong", regex: /Zong[^0-9]*(\d+)/gi }
-  ];
+  // Extract CNIC from HTML
+  let extractedCnic = cnic;
+  const cnicMatch = html.match(/ID Card Number:&nbsp;\s*(\d+)/);
+  if (cnicMatch) {
+    extractedCnic = cnicMatch[1];
+  }
 
-  const networkCounts = {
-    'Jazz': { voice: 0, data: 0 },
-    'Telenor': { voice: 0, data: 0 },
-    'Ufone': { voice: 0, data: 0 }, 
-    'Zong': { voice: 0, data: 0 }
+  // Extract Date
+  let date = "Not Available";
+  const dateMatch = html.match(/Date :&nbsp;\s*([^<]+)</);
+  if (dateMatch) {
+    date = dateMatch[1].trim();
+  }
+
+  // Extract network data using more precise parsing
+  const networkData = {
+    'Jazz': { voice: 0, data: 0, total: 0 },
+    'Telenor': { voice: 0, data: 0, total: 0 },
+    'Ufone': { voice: 0, data: 0, total: 0 },
+    'Zong': { voice: 0, data: 0, total: 0 }
   };
 
-  // Extract owner information
-  const ownerInfo = extractOwnerInfo(html);
+  // Parse Jazz data
+  const jazzMatch = html.match(/Jazz[^>]*>[\s\S]*?<td[^>]*>(\d+)<\/td>[\s\S]*?<td[^>]*>(\d+)<\/td>[\s\S]*?<td[^>]*>(\d+)<\/td>/);
+  if (jazzMatch) {
+    networkData.Jazz.voice = parseInt(jazzMatch[1]) || 0;
+    networkData.Jazz.data = parseInt(jazzMatch[2]) || 0;
+    networkData.Jazz.total = parseInt(jazzMatch[3]) || 0;
+  }
 
-  // Search for network counts
-  networkPatterns.forEach(pattern => {
-    const matches = html.matchAll(pattern.regex);
-    for (const match of matches) {
-      const count = parseInt(match[1]) || 1;
-      networkCounts[pattern.name].voice += count;
-    }
-  });
+  // Parse Telenor data
+  const telenorMatch = html.match(/Telenor[^>]*>[\s\S]*?<td[^>]*>(\d+)<\/td>[\s\S]*?<td[^>]*>(\d+)<\/td>[\s\S]*?<td[^>]*>(\d+)<\/td>/);
+  if (telenorMatch) {
+    networkData.Telenor.voice = parseInt(telenorMatch[1]) || 0;
+    networkData.Telenor.data = parseInt(telenorMatch[2]) || 0;
+    networkData.Telenor.total = parseInt(telenorMatch[3]) || 0;
+  }
 
-  // Also look for total SIM counts
-  const totalSimRegex = /Total SIMs?[^0-9]*(\d+)/gi;
-  const totalMatch = html.match(totalSimRegex);
-  let totalSims = 0;
-  
+  // Parse Ufone data
+  const ufoneMatch = html.match(/Ufone[^>]*>[\s\S]*?<td[^>]*>(\d+)<\/td>[\s\S]*?<td[^>]*>(\d+)<\/td>[\s\S]*?<td[^>]*>(\d+)<\/td>/);
+  if (ufoneMatch) {
+    networkData.Ufone.voice = parseInt(ufoneMatch[1]) || 0;
+    networkData.Ufone.data = parseInt(ufoneMatch[2]) || 0;
+    networkData.Ufone.total = parseInt(ufoneMatch[3]) || 0;
+  }
+
+  // Parse Zong data
+  const zongMatch = html.match(/Zong[^>]*>[\s\S]*?<td[^>]*>(\d+)<\/td>[\s\S]*?<td[^>]*>(\d+)<\/td>[\s\S]*?<td[^>]*>(\d+)<\/td>/);
+  if (zongMatch) {
+    networkData.Zong.voice = parseInt(zongMatch[1]) || 0;
+    networkData.Zong.data = parseInt(zongMatch[2]) || 0;
+    networkData.Zong.total = parseInt(zongMatch[3]) || 0;
+  }
+
+  // Parse Total data
+  let totalVoice = 0, totalData = 0, totalAll = 0;
+  const totalMatch = html.match(/Total[^>]*>[\s\S]*?<td[^>]*>(\d+)<\/td>[\s\S]*?<td[^>]*>(\d+)<\/td>[\s\S]*?<td[^>]*>(\d+)<\/td>/);
   if (totalMatch) {
-    totalSims = parseInt(totalMatch[1]) || 0;
+    totalVoice = parseInt(totalMatch[1]) || 0;
+    totalData = parseInt(totalMatch[2]) || 0;
+    totalAll = parseInt(totalMatch[3]) || 0;
   }
 
   // Convert to networks array
-  Object.keys(networkCounts).forEach(network => {
-    if (networkCounts[network].voice > 0 || networkCounts[network].data > 0) {
+  Object.keys(networkData).forEach(network => {
+    if (networkData[network].voice > 0 || networkData[network].data > 0 || networkData[network].total > 0) {
       networks.push({
         network: network,
-        voiceData: networkCounts[network].voice,
-        dataOnly: networkCounts[network].data,
-        total: networkCounts[network].voice + networkCounts[network].data
+        voiceData: networkData[network].voice,
+        dataOnly: networkData[network].data,
+        total: networkData[network].total
       });
     }
   });
 
-  // If we have networks but no totals, calculate them
+  // Add total row
   if (networks.length > 0) {
-    const totalVoice = networks.reduce((sum, net) => sum + net.voiceData, 0);
-    const totalData = networks.reduce((sum, net) => sum + net.dataOnly, 0);
-    const overallTotal = networks.reduce((sum, net) => sum + net.total, 0);
-    
     networks.push({
       network: "Total",
-      voiceData: totalVoice,
-      dataOnly: totalData,
-      total: overallTotal
+      voiceData: totalVoice || networks.reduce((sum, net) => sum + net.voiceData, 0),
+      dataOnly: totalData || networks.reduce((sum, net) => sum + net.dataOnly, 0),
+      total: totalAll || networks.reduce((sum, net) => sum + net.total, 0)
     });
   }
 
   return {
     owner_info: {
-      name: ownerInfo.name,
-      cnic: cnic,
-      father_name: ownerInfo.fatherName,
-      address: ownerInfo.address
+      cnic: extractedCnic,
+      date: date
     },
     sim_details: {
-      total_numbers: networks.find(n => n.network === "Total")?.total || totalSims,
+      total_numbers: totalAll || networks.find(n => n.network === "Total")?.total || 0,
       networks: networks.filter(n => n.network !== "Total"),
-      numbers_list: extractMobileNumbers(html)
-    },
-    summary: {
-      totalVoiceData: networks.find(n => n.network === "Total")?.voiceData || 0,
-      totalDataOnly: networks.find(n => n.network === "Total")?.dataOnly || 0,
-      overallTotal: networks.find(n => n.network === "Total")?.total || totalSims
-    }
-  };
-}
-
-// Extract owner information
-function extractOwnerInfo(html) {
-  const ownerInfo = {
-    name: 'Not Available',
-    fatherName: 'Not Available',
-    address: 'Not Available'
-  };
-
-  // Extract Name
-  const nameRegex = /Owner Name[^:]*:([^<]+)/gi;
-  const nameMatch = html.match(nameRegex);
-  if (nameMatch) {
-    ownerInfo.name = nameMatch[0].split(':')[1]?.trim() || 'Not Available';
-  }
-
-  // Extract Father Name
-  const fatherRegex = /Father Name[^:]*:([^<]+)/gi;
-  const fatherMatch = html.match(fatherRegex);
-  if (fatherMatch) {
-    ownerInfo.fatherName = fatherMatch[0].split(':')[1]?.trim() || 'Not Available';
-  }
-
-  // Extract Address
-  const addressRegex = /Address[^:]*:([^<]+)/gi;
-  const addressMatch = html.match(addressRegex);
-  if (addressMatch) {
-    ownerInfo.address = addressMatch[0].split(':')[1]?.trim() || 'Not Available';
-  }
-
-  return ownerInfo;
-}
-
-// Extract mobile numbers
-function extractMobileNumbers(html) {
-  const numbers = [];
-  const mobileRegex = /03\d{2}[-]?\d{7}/g;
-  const matches = html.matchAll(mobileRegex);
-  
-  for (const match of matches) {
-    numbers.push({
-      number: match[0].replace(/-/g, ''),
-      network: 'Unknown',
-      status: 'Active'
-    });
-  }
-  
-  return numbers;
-}
-
-// Fetch from alternative sources
-async function fetchAlternativeData(cnic) {
-  // Add other working SIM database URLs here
-  const alternativeUrls = [
-    `https://paksiminfo.com/api/check/${cnic}`,
-    `https://simdatabase.pk/api/sim-check/${cnic}`
-  ];
-  
-  for (const url of alternativeUrls) {
-    try {
-      const response = await fetch(url, {
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        if (data && data.success) {
-          return data;
-        }
+      summary: {
+        totalVoiceData: totalVoice || networks.find(n => n.network === "Total")?.voiceData || 0,
+        totalDataOnly: totalData || networks.find(n => n.network === "Total")?.dataOnly || 0,
+        overallTotal: totalAll || networks.find(n => n.network === "Total")?.total || 0
       }
-    } catch (error) {
-      continue;
     }
+  };
   }
-  
-  return null;
-                }
