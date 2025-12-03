@@ -1,4 +1,4 @@
-// Temp Email API using TempMail.lol
+// GuerrillaMail API
 addEventListener('fetch', event => {
   event.respondWith(handleRequest(event.request))
 })
@@ -6,32 +6,20 @@ addEventListener('fetch', event => {
 async function handleRequest(request) {
   const url = new URL(request.url)
   const path = url.pathname
-  const apiBase = 'https://api.tempmail.lol'
+  const apiBase = 'https://api.guerrillamail.com/ajax.php'
   
-  // ============ GENERATE NEW EMAIL ============
+  // ============ GET NEW EMAIL ============
   if (path === '/api/new' || path === '/new') {
     try {
-      // Get available domains first
-      const domainsRes = await fetch(`${apiBase}/gen`)
-      const domainsData = await domainsRes.json()
-      
-      // Create email from first available domain
-      const emailRes = await fetch(`${apiBase}/gen`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: Math.random().toString(36).substring(2, 10),
-          domain: domainsData.domains[0] || 'tempmail.lol'
-        })
-      })
-      
-      const emailData = await emailRes.json()
+      // Get new email address
+      const response = await fetch(`${apiBase}?f=get_email_address`)
+      const data = await response.json()
       
       return jsonResponse({
         success: true,
-        email: emailData.address,
-        token: emailData.token, // Save this for checking inbox
-        expires: emailData.expires,
+        email: data.email_addr,
+        alias: data.alias,
+        sid_token: data.sid_token,
         timestamp: new Date().toISOString()
       })
     } catch (error) {
@@ -44,25 +32,25 @@ async function handleRequest(request) {
   
   // ============ CHECK INBOX ============
   if (path === '/api/inbox' || path === '/inbox') {
-    const token = url.searchParams.get('token')
+    const sid = url.searchParams.get('sid_token')
     const email = url.searchParams.get('email')
     
-    if (!token) {
+    if (!sid) {
       return jsonResponse({
         success: false,
-        error: "Token parameter required"
+        error: "sid_token parameter required"
       }, 400)
     }
     
     try {
-      const response = await fetch(`${apiBase}/auth/${token}`)
-      const inbox = await response.json()
+      const response = await fetch(`${apiBase}?f=get_email_list&offset=0&sid_token=${sid}`)
+      const data = await response.json()
       
       return jsonResponse({
         success: true,
-        email: email || inbox.email,
-        count: inbox.email.length,
-        messages: inbox.email
+        email: email || data.email_addr,
+        count: data.count,
+        messages: data.list
       })
     } catch (error) {
       return jsonResponse({
@@ -72,23 +60,44 @@ async function handleRequest(request) {
     }
   }
   
-  // ============ API INFO ============
-  if (path === '/' || path === '/help') {
-    return jsonResponse({
-      api_name: "Temp Mail API",
-      service: "TempMail.lol",
-      endpoints: {
-        "Create new email": "/api/new",
-        "Check inbox": "/api/inbox?token=YOUR_TOKEN&email=optional@email.com"
-      },
-      note: "Save the 'token' from /new response to check inbox"
-    })
+  // ============ FETCH EMAIL ============
+  if (path === '/api/fetch' || path === '/fetch') {
+    const sid = url.searchParams.get('sid_token')
+    const emailId = url.searchParams.get('email_id')
+    
+    if (!sid || !emailId) {
+      return jsonResponse({
+        success: false,
+        error: "sid_token and email_id parameters required"
+      }, 400)
+    }
+    
+    try {
+      const response = await fetch(`${apiBase}?f=fetch_email&email_id=${emailId}&sid_token=${sid}`)
+      const data = await response.json()
+      
+      return jsonResponse({
+        success: true,
+        message: data
+      })
+    } catch (error) {
+      return jsonResponse({
+        success: false,
+        error: "Failed to fetch email"
+      }, 500)
+    }
   }
   
+  // ============ API DOCS ============
   return jsonResponse({
-    success: false,
-    error: "Endpoint not found"
-  }, 404)
+    api_name: "GuerrillaMail API",
+    endpoints: {
+      "Get new email": "/api/new",
+      "Check inbox": "/api/inbox?sid_token=YOUR_TOKEN",
+      "Read email": "/api/fetch?sid_token=TOKEN&email_id=ID"
+    },
+    note: "Save sid_token from /new response"
+  })
 }
 
 function jsonResponse(data, status = 200) {
