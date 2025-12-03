@@ -1,4 +1,4 @@
-// Temp Email API - Cloudflare Workers Version
+// Temp Email API using TempMail.lol
 addEventListener('fetch', event => {
   event.respondWith(handleRequest(event.request))
 })
@@ -6,47 +6,63 @@ addEventListener('fetch', event => {
 async function handleRequest(request) {
   const url = new URL(request.url)
   const path = url.pathname
+  const apiBase = 'https://api.tempmail.lol'
   
-  // Base URL for 1secmail service
-  const baseUrl = "https://www.1secmail.com/api/v1/"
-  
-  // ============ GENERATE NEW TEMP EMAIL ============
+  // ============ GENERATE NEW EMAIL ============
   if (path === '/api/new' || path === '/new') {
-    const domains = ["1secmail.com", "1secmail.org", "1secmail.net"]
-    const randomString = Math.random().toString(36).substring(2, 12)
-    const randomDomain = domains[Math.floor(Math.random() * domains.length)]
-    const email = `${randomString}@${randomDomain}`
-    
-    return jsonResponse({
-      success: true,
-      email: email,
-      timestamp: new Date().toISOString()
-    })
+    try {
+      // Get available domains first
+      const domainsRes = await fetch(`${apiBase}/gen`)
+      const domainsData = await domainsRes.json()
+      
+      // Create email from first available domain
+      const emailRes = await fetch(`${apiBase}/gen`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          name: Math.random().toString(36).substring(2, 10),
+          domain: domainsData.domains[0] || 'tempmail.lol'
+        })
+      })
+      
+      const emailData = await emailRes.json()
+      
+      return jsonResponse({
+        success: true,
+        email: emailData.address,
+        token: emailData.token, // Save this for checking inbox
+        expires: emailData.expires,
+        timestamp: new Date().toISOString()
+      })
+    } catch (error) {
+      return jsonResponse({
+        success: false,
+        error: "Failed to generate email"
+      }, 500)
+    }
   }
   
   // ============ CHECK INBOX ============
   if (path === '/api/inbox' || path === '/inbox') {
+    const token = url.searchParams.get('token')
     const email = url.searchParams.get('email')
     
-    if (!email || !email.includes('@')) {
+    if (!token) {
       return jsonResponse({
         success: false,
-        error: "Valid email parameter required"
+        error: "Token parameter required"
       }, 400)
     }
     
-    const [login, domain] = email.split('@')
-    const inboxUrl = `${baseUrl}?action=getMessages&login=${login}&domain=${domain}`
-    
     try {
-      const response = await fetch(inboxUrl)
-      const messages = await response.json()
+      const response = await fetch(`${apiBase}/auth/${token}`)
+      const inbox = await response.json()
       
       return jsonResponse({
         success: true,
-        email: email,
-        count: messages.length,
-        messages: messages
+        email: email || inbox.email,
+        count: inbox.email.length,
+        messages: inbox.email
       })
     } catch (error) {
       return jsonResponse({
@@ -56,97 +72,25 @@ async function handleRequest(request) {
     }
   }
   
-  // ============ READ SPECIFIC EMAIL ============
-  if (path === '/api/read' || path === '/read') {
-    const email = url.searchParams.get('email')
-    const id = url.searchParams.get('id')
-    
-    if (!email || !id) {
-      return jsonResponse({
-        success: false,
-        error: "Email and id parameters required"
-      }, 400)
-    }
-    
-    const [login, domain] = email.split('@')
-    const readUrl = `${baseUrl}?action=readMessage&login=${login}&domain=${domain}&id=${id}`
-    
-    try {
-      const response = await fetch(readUrl)
-      const emailData = await response.json()
-      
-      return jsonResponse({
-        success: true,
-        email: email,
-        message: emailData
-      })
-    } catch (error) {
-      return jsonResponse({
-        success: false,
-        error: "Failed to read email"
-      }, 500)
-    }
-  }
-  
-  // ============ DELETE EMAIL (Optional) ============
-  if (path === '/api/delete' || path === '/delete') {
-    const email = url.searchParams.get('email')
-    const id = url.searchParams.get('id')
-    
-    if (!email || !id) {
-      return jsonResponse({
-        success: false,
-        error: "Email and id parameters required"
-      }, 400)
-    }
-    
-    const [login, domain] = email.split('@')
-    const deleteUrl = `${baseUrl}?action=deleteMessage&login=${login}&domain=${domain}&id=${id}`
-    
-    try {
-      const response = await fetch(deleteUrl)
-      const result = await response.text()
-      
-      return jsonResponse({
-        success: true,
-        message: "Email deleted successfully",
-        result: result
-      })
-    } catch (error) {
-      return jsonResponse({
-        success: false,
-        error: "Failed to delete email"
-      }, 500)
-    }
-  }
-  
-  // ============ API DOCUMENTATION ============
+  // ============ API INFO ============
   if (path === '/' || path === '/help') {
     return jsonResponse({
       api_name: "Temp Mail API",
+      service: "TempMail.lol",
       endpoints: {
         "Create new email": "/api/new",
-        "Check inbox": "/api/inbox?email=your@email.com",
-        "Read email": "/api/read?email=your@email.com&id=123",
-        "Delete email": "/api/delete?email=your@email.com&id=123"
+        "Check inbox": "/api/inbox?token=YOUR_TOKEN&email=optional@email.com"
       },
-      example: {
-        "create": "https://your-worker.workers.dev/api/new",
-        "inbox": "https://your-worker.workers.dev/api/inbox?email=abc123@1secmail.com",
-        "read": "https://your-worker.workers.dev/api/read?email=abc123@1secmail.com&id=123456"
-      }
+      note: "Save the 'token' from /new response to check inbox"
     })
   }
   
-  // ============ DEFAULT: 404 NOT FOUND ============
   return jsonResponse({
     success: false,
-    error: "Endpoint not found",
-    available_endpoints: ["/new", "/inbox", "/read", "/delete", "/help"]
+    error: "Endpoint not found"
   }, 404)
 }
 
-// Helper function to create JSON responses
 function jsonResponse(data, status = 200) {
   return new Response(JSON.stringify(data, null, 2), {
     status: status,
